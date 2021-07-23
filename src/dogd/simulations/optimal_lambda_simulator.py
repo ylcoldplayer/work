@@ -4,7 +4,7 @@ from numpy.random import lognormal
 from src.logger import work_logger
 
 
-class LambdaMode(Enum):
+class BenchmarkMode(Enum):
     FLOOR_MODE = 1
     CAP_MODE = 2
     INIT_MODE = 3
@@ -23,32 +23,32 @@ class OptimalLambdaSimulator:
         self.bid_init = bid_init
         self.lambda_mode = lambda_mode
         self.lambda_t = self._compute_init_lambda()
-        self.bid_bench = self._get_bid_bench()
+        self.bid_benchmark = self._get_bid_bench()
         self.total_win = 0
         self.expected_cost = total_budget*1./len(pay_prices)
         self.remaining_budget = total_budget
         self.step_size = STEP_SIZE
 
     def _compute_init_lambda(self):
-        if self.lambda_mode is LambdaMode.FLOOR_MODE:
+        if self.lambda_mode is BenchmarkMode.FLOOR_MODE:
             return self.bid_floor*1./self.bid_init
-        elif self.lambda_mode is LambdaMode.CAP_MODE:
+        elif self.lambda_mode is BenchmarkMode.CAP_MODE:
             return self.bid_cap*1./self.bid_init
         else:
             return 1.
 
     def _get_bid_bench(self):
-        if self.lambda_mode is LambdaMode.FLOOR_MODE:
+        if self.lambda_mode is BenchmarkMode.FLOOR_MODE:
             return self.bid_floor
-        elif self.lambda_mode is LambdaMode.CAP_MODE:
+        elif self.lambda_mode is BenchmarkMode.CAP_MODE:
             return self.bid_cap
         else:
             return self.bid_init
 
     def _compute_lambda_floor_cap(self):
-        if self.lambda_mode is LambdaMode.FLOOR_MODE:
+        if self.lambda_mode is BenchmarkMode.FLOOR_MODE:
             return self.bid_floor/self.bid_cap, 1.
-        elif self.lambda_mode is LambdaMode.CAP_MODE:
+        elif self.lambda_mode is BenchmarkMode.CAP_MODE:
             return 1., self.bid_cap/self.bid_floor
         else:
             return self.bid_init/self.bid_cap, self.bid_init/self.bid_floor
@@ -73,7 +73,7 @@ class OptimalLambdaSimulator:
             round_t = "round " + str(t)
             pay_price = self.pay_prices[t]
             lambda_t = self.lambda_t
-            bid = self.bid_bench/self.lambda_t
+            bid = self.bid_benchmark / self.lambda_t
             bid = min(max(self.bid_floor, bid), min(self.bid_cap, self.remaining_budget))
             logger.info(round_t + " bid price: " + str(bid))
             logger.info(round_t + " pay price: " + str(pay_price))
@@ -115,6 +115,6 @@ if __name__ == '__main__':
     bid_f = 0.5
     bid_c = 20.
     bid_i = 2.
-    lambda_m = LambdaMode.FLOOR_MODE
+    lambda_m = BenchmarkMode.FLOOR_MODE
     simulator = OptimalLambdaSimulator(pay_ps, B, bid_f, bid_c, bid_i, lambda_m)
     print(simulator.simulate())
