@@ -88,6 +88,7 @@ class OptimalLambdaSimulator:
                 logger.info(round_t + " cost ratio: " + str(cost_ratio))
             lambda_t = lambda_t - self.step_size*(1-cost_ratio)
             self.lambda_t = min(max(lambda_floor, lambda_t), lambda_cap)
+            logger.info(round_t + " remaining budget: " + str(self.remaining_budget))
             logger.info("*********************************************************************************************")
             logger.info("*********************************************************************************************")
         logger.info('total_win: ' + str(self.total_win) + ' , remaining_budget: ' + str(self.remaining_budget))
