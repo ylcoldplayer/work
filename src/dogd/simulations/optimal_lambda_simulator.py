@@ -23,7 +23,7 @@ class OptimalLambdaSimulator:
         self.bid_init = bid_init
         self.lambda_mode = lambda_mode
         self.lambda_t = self._compute_init_lambda()
-        self.bid_benchmark = self._get_bid_bench()
+        self.bid_benchmark = self._get_bid_benchmark()
         self.total_win = 0
         self.expected_cost = total_budget*1./len(pay_prices)
         self.remaining_budget = total_budget
@@ -37,7 +37,7 @@ class OptimalLambdaSimulator:
         else:
             return 1.
 
-    def _get_bid_bench(self):
+    def _get_bid_benchmark(self):
         if self.lambda_mode is BenchmarkMode.FLOOR_MODE:
             return self.bid_floor
         elif self.lambda_mode is BenchmarkMode.CAP_MODE:
