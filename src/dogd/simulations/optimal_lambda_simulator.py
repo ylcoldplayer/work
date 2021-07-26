@@ -1,5 +1,9 @@
 import random
 from enum import Enum
+
+import numpy as np
+import matplotlib.pyplot as plt
+
 from numpy.random import lognormal
 from src.logger import work_logger
 
@@ -57,7 +61,7 @@ class OptimalLambdaSimulator:
         lambda_mode = 'mode_' + str(self.lambda_mode.name)
         total_budget = 'B_' + str(self.total_budget)
         bid_floor = 'bf_' + str(self.bid_floor)
-        bid_cap = 'bd_' + str(self.bid_cap)
+        bid_cap = 'bc_' + str(self.bid_cap)
         bid_init = 'bi_' + str(self.bid_init)
         step_size = 'sz_' + str(self.step_size)
 
@@ -69,12 +73,16 @@ class OptimalLambdaSimulator:
         T = len(self.pay_prices)
         logger_file_name = self._get_logger_file_name()
         logger = work_logger.get_work_logger('lambda_simulation', file_name=logger_file_name)
+
+        bid_records = []
+
         for t in range(T):
             round_t = "round " + str(t)
             pay_price = self.pay_prices[t]
             lambda_t = self.lambda_t
             bid = self.bid_benchmark / self.lambda_t
             bid = min(max(self.bid_floor, bid), min(self.bid_cap, self.remaining_budget))
+            bid_records.append(bid)
             logger.info(round_t + " bid price: " + str(bid))
             logger.info(round_t + " pay price: " + str(pay_price))
             logger.info(round_t + " lambda: " + str(lambda_t))
@@ -92,10 +100,10 @@ class OptimalLambdaSimulator:
             logger.info("*********************************************************************************************")
             logger.info("*********************************************************************************************")
         logger.info('total_win: ' + str(self.total_win) + ' , remaining_budget: ' + str(self.remaining_budget))
-        return self.total_win, self.remaining_budget
+        return self.total_win, self.remaining_budget, bid_records
 
 
-def generate_pay_price(mu=2., sigma=0.5):
+def generate_pay_price(mu=0, sigma=0.5):
     """
     To visualize lognormal distribution, goto https://homepage.divms.uiowa.edu/~mbognar/applets/lognormal.html
     :param mu:
@@ -109,12 +117,27 @@ if __name__ == '__main__':
     random.seed(0)
     # synthesize pay prices
     pay_ps = []
-    for i in range(96):
+    for i in range(200):
         pay_ps.append(generate_pay_price())
-    B = 80
-    bid_f = 0.5
-    bid_c = 20.
-    bid_i = 2.
-    lambda_m = BenchmarkMode.FLOOR_MODE
-    simulator = OptimalLambdaSimulator(pay_ps, B, bid_f, bid_c, bid_i, lambda_m)
-    print(simulator.simulate())
+    B = 50
+    bid_f = 0.1
+    bid_c = 10.
+    bid_i = 0.2
+
+    simulator_floor = OptimalLambdaSimulator(pay_ps, B, bid_f, bid_c, bid_i, BenchmarkMode.FLOOR_MODE)
+    simulator_init = OptimalLambdaSimulator(pay_ps, B, bid_f, bid_c, bid_i, BenchmarkMode.INIT_MODE)
+    win_floor, remain_budget_floor, bid_records_floor = simulator_floor.simulate()
+    win_init, remain_budget_init, bid_records_init = simulator_init.simulate()
+
+    np_bid_records_floor = np.array(bid_records_floor)
+    np_bid_records_init = np.array(bid_records_init)
+    print(bid_records_floor)
+    print(bid_records_init)
+    print(win_floor, remain_budget_floor)
+    print(win_init, remain_budget_init)
+    print("floor mean: ", np.mean(np_bid_records_floor), " floor std: ", np.std(np_bid_records_floor))
+    print("init mean: ", np.mean(np_bid_records_init), " floor std: ", np.std(np_bid_records_init))
+
+    t_index = list(range(len(bid_records_floor)))
+    plt.plot(t_index, bid_records_floor, label="line 1")
+    plt.show()
