@@ -1,3 +1,4 @@
+import math
 import random
 from enum import Enum
 
@@ -17,12 +18,22 @@ class BenchmarkMode(Enum):
     CONST_MODE = 4
 
 
+class LRDecayMode(Enum):
+    FIXED = 1
+    LINEAR = 2
+    EXP = 3
+
+
 STEP_SIZE = 0.05
 CONST_BID = 100
+COST_RATIO_CAP = 2.
+ANNEAL_SPEED = 0.0075
+STEP_SIZE_FLOOR = 0.05
+DECAY_RATE = 10.
 
 
 class OptimalLambdaSimulator:
-    def __init__(self, pay_prices, total_budget, bid_floor, bid_cap, bid_init, lambda_mode, step_size=STEP_SIZE):
+    def __init__(self, pay_prices, total_budget, bid_floor, bid_cap, bid_init, lambda_mode, step_size=STEP_SIZE, no_auction_error=0., lr_mode=LRDecayMode.FIXED):
         random.seed(0)
         self.pay_prices = pay_prices
         self.total_budget = total_budget
@@ -33,9 +44,10 @@ class OptimalLambdaSimulator:
         self.lambda_t = self._compute_init_lambda()
         self.bid_benchmark = self._get_bid_benchmark()
         self.total_win = 0
-        self.expected_cost = total_budget*1./len(pay_prices)
+        self.expected_cost = total_budget*1./(len(pay_prices)*(1+no_auction_error))
         self.remaining_budget = total_budget
         self.step_size = step_size
+        self.lr_mode = lr_mode
 
     def _compute_init_lambda(self):
         if self.lambda_mode is BenchmarkMode.FLOOR_MODE:
@@ -95,6 +107,7 @@ class OptimalLambdaSimulator:
             logger.info(round_t + " lambda: " + str(lambda_t))
             if bid >= pay_price:
                 cost_ratio = pay_price/self.expected_cost
+                cost_ratio = min(cost_ratio, COST_RATIO_CAP)
                 self.remaining_budget -= pay_price
                 self.total_win += 1
                 logger.info(round_t + " cost ratio: " + str(cost_ratio))
@@ -104,7 +117,12 @@ class OptimalLambdaSimulator:
                 logger.info(round_t + " cost ratio: " + str(cost_ratio))
 
             budget_consumption_records.append(B-self.remaining_budget)
-            lambda_t = lambda_t - self.step_size*(1-cost_ratio)
+            sz = self.step_size
+            if self.lr_mode == LRDecayMode.LINEAR:
+                sz = max(self.step_size - t*ANNEAL_SPEED, STEP_SIZE_FLOOR)
+            elif self.lr_mode == LRDecayMode.FIXED:
+                sz = max(self.step_size*math.exp(-DECAY_RATE*t), STEP_SIZE_FLOOR)
+            lambda_t = lambda_t - sz*(1-cost_ratio)
             self.lambda_t = min(max(lambda_floor, lambda_t), lambda_cap)
             logger.info(round_t + " remaining budget: " + str(self.remaining_budget))
             logger.info("*********************************************************************************************")
@@ -131,59 +149,267 @@ def cpi(total_win, B, remain_budget):
 
 if __name__ == '__main__':
     ############################################################################################################
-    ################## Uncomment the following code to test different initial bids ############################
+    ############ Uncomment the following code to test revenue impact with different learning rate###############
     ############################################################################################################
-    random.seed(0)
+    # random.seed(1)
     # synthesize pay prices
-    pay_ps = []
-    for i in range(200):
-        pay_ps.append(generate_pay_price())
+    # pay_ps = []
+    # for i in range(144):
+    #     pay_ps.append(generate_pay_price())
 
 
     B = 50
     bid_f = 0.1
-    bid_c = 10.
-    bid_i = 10
+    bid_c = 10
 
     bid_inits = np.linspace(start=bid_f, stop=bid_c, num=100)
 
-    wins_init_records = []
-    wins_floor_records = []
-    cpi_init_records = []
-    cpi_floor_records = []
+    bid_inits_size = len(bid_inits)
 
-    for bid_i in bid_inits:
-        simulator_init = OptimalLambdaSimulator(pay_ps, B, bid_f, bid_c, bid_i, BenchmarkMode.INIT_MODE, step_size=0.11)
-        simulator_floor = OptimalLambdaSimulator(pay_ps, B, bid_f, bid_c, bid_i, BenchmarkMode.FLOOR_MODE, step_size=0.05)
-        wins_init, remain_budget_init, _, _ = simulator_init.simulate()
-        wins_floor, remain_budget_floor, _, _ = simulator_floor.simulate()
-        cpi_init = cpi(wins_init, B, remain_budget_init)
-        cpi_floor = cpi(wins_floor, B, remain_budget_floor)
+    wins_init_linear_records = [0]*bid_inits_size
+    wins_init_exp_records = [0]*bid_inits_size
+    wins_floor_records = [0]*bid_inits_size
+    cpi_init_linear_records = [0]*bid_inits_size
+    cpi_init_exp_records = [0]*bid_inits_size
+    cpi_floor_records = [0]*bid_inits_size
 
-        wins_init_records.append(wins_init)
-        wins_floor_records.append(wins_floor)
-        cpi_init_records.append(cpi_init)
-        cpi_floor_records.append(cpi_floor)
+    for j in range(100):
+        random.seed(j)
+        pay_ps = []
+        for _ in range(144):
+            pay_ps.append(generate_pay_price())
+        for i in range(bid_inits_size):
+            bid_i = bid_inits[i]
+            simulator_init_linear_decay = OptimalLambdaSimulator(pay_ps, B, bid_f, bid_c, bid_i, BenchmarkMode.INIT_MODE, step_size=0.5, lr_mode=LRDecayMode.LINEAR)
+            simulator_init_exp_decay = OptimalLambdaSimulator(pay_ps, B, bid_f, bid_c, bid_i, BenchmarkMode.INIT_MODE, step_size=0.5, lr_mode=LRDecayMode.EXP)
+            simulator_floor = OptimalLambdaSimulator(pay_ps, B, bid_f, bid_c, bid_i, BenchmarkMode.FLOOR_MODE, step_size=0.05)
+            wins_init_linear, remain_budget_init_linear, _, _ = simulator_init_linear_decay.simulate()
+            wins_init_exp, remain_budget_init_exp, _, _ = simulator_init_exp_decay.simulate()
+            wins_floor, remain_budget_floor, _, _ = simulator_floor.simulate()
+            cpi_init_linear = cpi(wins_init_linear, B, remain_budget_init_linear)
+            cpi_init_exp = cpi(wins_init_exp, B, remain_budget_init_exp)
+            cpi_floor = cpi(wins_floor, B, remain_budget_floor)
+
+            wins_init_linear_records[i] += wins_init_linear
+            wins_init_exp_records[i] += wins_init_exp
+            wins_floor_records[i] += wins_floor
+            cpi_init_linear_records[i] += cpi_init_linear
+            cpi_init_exp_records[i] += cpi_init_exp
+            cpi_floor_records[i] += cpi_floor
+
+    wins_init_linear_records = [x/bid_inits_size for x in wins_init_linear_records]
+    wins_init_exp_records = [x/bid_inits_size for x in wins_init_exp_records]
+    wins_floor_records = [x/bid_inits_size for x in wins_floor_records]
+    cpi_init_linear_records = [x/bid_inits_size for x in cpi_init_linear_records]
+    cpi_init_exp_records = [x/bid_inits_size for x in cpi_init_exp_records]
+    cpi_floor_records = [x/bid_inits_size for x in cpi_floor_records]
 
     fig, axe = plt.subplots(1, 2)
 
     axe[0].set_xlabel('initial bid')
     axe[0].set_ylabel('total wins')
-    axe[0].plot(bid_inits, wins_init_records, label="InitMode")
+    axe[0].plot(bid_inits, wins_init_linear_records, label="InitModeLinear")
+    axe[0].plot(bid_inits, wins_init_exp_records, label="InitModeExp")
     axe[0].plot(bid_inits, wins_floor_records, label="FloorMode")
     axe[0].legend()
     # axe[0].set_title('total_wins')
 
     axe[1].set_xlabel('initial bid')
     axe[1].set_ylabel('cpi')
-    axe[1].plot(bid_inits, cpi_init_records, label='InitMode')
+    axe[1].plot(bid_inits, cpi_init_linear_records, label='InitModeLinear')
+    axe[1].plot(bid_inits, cpi_init_exp_records, label='InitModeExp')
     axe[1].plot(bid_inits, cpi_floor_records, label='FloorMode')
     axe[1].legend()
     # axe[1].set_title('cpi')
 
-    fig.suptitle('B_50_bfloor_0.1_bcap_10_init_stepsz_0.075_floor_stepsz_0.05')
+    fig.suptitle('B_50_bfloor_0.1_bcap_10_init')
     plt.subplots_adjust(hspace=0, wspace=0.5)
     plt.show()
+
+
+    # random.seed(0)
+    # # synthesize pay prices
+    # pay_ps = []
+    # for i in range(300):
+    #     pay_ps.append(generate_pay_price())
+    #
+    # B = 150
+    # bid_f = 0.1
+    # bid_c = 10
+    #
+    # bid_inits = np.linspace(start=bid_f, stop=bid_c, num=100)
+    #
+    #
+    # cpi_init_records_00 = []
+    # cpi_floor_records_00 = []
+    #
+    # for bid_i in bid_inits:
+    #     simulator_init = OptimalLambdaSimulator(pay_ps, B, bid_f, bid_c, bid_i, BenchmarkMode.INIT_MODE, step_size=0.1)
+    #     simulator_floor = OptimalLambdaSimulator(pay_ps, B, bid_f, bid_c, bid_i, BenchmarkMode.FLOOR_MODE, step_size=0.05)
+    #     wins_init, remain_budget_init, _, _ = simulator_init.simulate()
+    #     wins_floor, remain_budget_floor, _, _ = simulator_floor.simulate()
+    #     cpi_init = cpi(wins_init, B, remain_budget_init)
+    #     cpi_floor = cpi(wins_floor, B, remain_budget_floor)
+    #     cpi_init_records_00.append(cpi_init)
+    #     cpi_floor_records_00.append(cpi_floor)
+    #
+    # cpi_init_records_30_plus = []
+    # cpi_floor_records_30_plus = []
+    #
+    # for bid_i in bid_inits:
+    #     simulator_init = OptimalLambdaSimulator(pay_ps, B, bid_f, bid_c, bid_i, BenchmarkMode.INIT_MODE, step_size=0.1, no_auction_error=0.3)
+    #     simulator_floor = OptimalLambdaSimulator(pay_ps, B, bid_f, bid_c, bid_i, BenchmarkMode.FLOOR_MODE, step_size=0.05, no_auction_error=0.3)
+    #     wins_init, remain_budget_init, _, _ = simulator_init.simulate()
+    #     wins_floor , remain_budget_floor, _, _ = simulator_floor.simulate()
+    #     cpi_init = cpi(wins_init, B, remain_budget_init)
+    #     cpi_floor = cpi(wins_floor, B, remain_budget_floor)
+    #     cpi_init_records_30_plus.append(cpi_init)
+    #     cpi_floor_records_30_plus.append(cpi_floor)
+    #
+    #
+    # cpi_init_records_30_minus = []
+    # cpi_floor_records_30_minus = []
+    #
+    # for bid_i in bid_inits:
+    #     simulator_init = OptimalLambdaSimulator(pay_ps, B, bid_f, bid_c, bid_i, BenchmarkMode.INIT_MODE, step_size=0.1, no_auction_error=-0.3)
+    #     simulator_floor = OptimalLambdaSimulator(pay_ps, B, bid_f, bid_c, bid_i, BenchmarkMode.FLOOR_MODE, step_size=0.05, no_auction_error=-0.3)
+    #     wins_init, remain_budget_init, _, _ = simulator_init.simulate()
+    #     wins_floor, remain_budget_floor, _, _ = simulator_floor.simulate()
+    #     cpi_init = cpi(wins_init, B, remain_budget_init)
+    #     cpi_floor = cpi(wins_floor, B, remain_budget_floor)
+    #     cpi_init_records_30_minus.append(cpi_init)
+    #     cpi_floor_records_30_minus.append(cpi_floor)
+    #
+    # fig, axe = plt.subplots(4, 1)
+    #
+    # axe[0].set_xlabel('init bid')
+    # axe[0].set_ylabel('cpi')
+    # axe[0].plot(bid_inits, np.divide(cpi_init_records_00, cpi_init_records_00), label='T')
+    # axe[0].plot(bid_inits, np.divide(cpi_init_records_30_plus, cpi_init_records_00), label='T 30% overestimate')
+    # axe[0].plot(bid_inits, np.divide(cpi_init_records_30_minus, cpi_init_records_00), label='T 30% underestimate')
+    # axe[0].legend()
+    # axe[0].set_title('InitMode_stepsz_0.1')
+    #
+    # axe[1].set_xlabel('init bid')
+    # axe[1].set_ylabel('cpi')
+    # axe[1].plot(bid_inits, np.divide(cpi_floor_records_00, cpi_floor_records_00), label='T')
+    # axe[1].plot(bid_inits, np.divide(cpi_floor_records_30_plus, cpi_floor_records_00), label='T 30% overestimate')
+    # axe[1].plot(bid_inits, np.divide(cpi_floor_records_30_minus, cpi_floor_records_00), label='T 30% underestimate')
+    # axe[1].legend()
+    # axe[1].set_title('FloorMode_stepsz_0.05')
+    #
+    #
+    # axe[2].set_xlabel('init bid')
+    # axe[2].set_ylabel('cpi')
+    # axe[2].plot(bid_inits, cpi_floor_records_30_plus , label='FloorMode')
+    # axe[2].plot(bid_inits, cpi_init_records_30_plus, label='InitMode')
+    # axe[2].legend()
+    # axe[2].set_title('30% overestimate T')
+    #
+    #
+    # axe[3].set_xlabel('init bid')
+    # axe[3].set_ylabel('cpi')
+    # axe[3].plot(bid_inits, cpi_floor_records_30_minus , label='FloorMode')
+    # axe[3].plot(bid_inits, cpi_init_records_30_minus, label='InitMode')
+    # axe[3].legend()
+    # axe[3].set_title('30% underestimate T')
+    #
+    #
+    # fig.suptitle('B_50_bfloor_0.1_bcap_10')
+    # plt.subplots_adjust(hspace=0.8, wspace=0.5)
+    # plt.show()
+
+
+
+    ############################################################################################################
+    ############ Uncomment the following code to test revenue impact with different initial bids ###############
+    ############################################################################################################
+    # random.seed(7)
+    # # synthesize pay prices
+    # pay_ps = []
+    # for i in range(200):
+    #     pay_ps.append(generate_pay_price())
+    #
+    # B = 50
+    # bid_f = 0.1
+    # bid_c = 10.
+    # bid_i = 10
+    #
+    # bid_inits = np.linspace(start=bid_f, stop=bid_c, num=100)
+    # spend_init_records = []
+    # spend_floor_records = []
+    #
+    # for bid_i in bid_inits:
+    #     simulator_init = OptimalLambdaSimulator(pay_ps, B, bid_f, bid_c, bid_i, BenchmarkMode.INIT_MODE, step_size=0.1)
+    #     simulator_floor = OptimalLambdaSimulator(pay_ps, B, bid_f, bid_c, bid_i, BenchmarkMode.FLOOR_MODE, step_size=0.05)
+    #     _, remain_budget_init, _, _ = simulator_init.simulate()
+    #     _, remain_budget_floor, _, _ = simulator_floor.simulate()
+    #     spend_floor_records.append(B-remain_budget_floor)
+    #     spend_init_records.append(B-remain_budget_init)
+    #
+    # plt.xlabel('init bid')
+    # plt.ylabel('spend')
+    # plt.plot(bid_inits, spend_init_records, label='InitMode')
+    # plt.plot(bid_inits, spend_floor_records, label='FloorMode')
+    # plt.legend()
+    # plt.title('B_50_bfloor_0.1_bcap_10_init_stepsz_0.1_floor_stepsz_0.05')
+    # plt.show()
+
+
+    ############################################################################################################
+    ############ Uncomment the following code to test performance with different initial bids ##################
+    ############################################################################################################
+    # random.seed(1)
+    # # synthesize pay prices
+    # pay_ps = []
+    # for i in range(144):
+    #     pay_ps.append(generate_pay_price())
+    #
+    #
+    # B = 50
+    # bid_f = 0.1
+    # bid_c = 10
+    # # bid_i = 5
+    #
+    # bid_inits = np.linspace(start=bid_f, stop=bid_c, num=100)
+    #
+    # wins_init_records = []
+    # wins_floor_records = []
+    # cpi_init_records = []
+    # cpi_floor_records = []
+    #
+    # for bid_i in bid_inits:
+    #     simulator_init = OptimalLambdaSimulator(pay_ps, B, bid_f, bid_c, bid_i, BenchmarkMode.INIT_MODE, step_size=0.5)
+    #     simulator_floor = OptimalLambdaSimulator(pay_ps, B, bid_f, bid_c, bid_i, BenchmarkMode.FLOOR_MODE, step_size=0.05)
+    #     wins_init, remain_budget_init, _, _ = simulator_init.simulate()
+    #     wins_floor, remain_budget_floor, _, _ = simulator_floor.simulate()
+    #     cpi_init = cpi(wins_init, B, remain_budget_init)
+    #     cpi_floor = cpi(wins_floor, B, remain_budget_floor)
+    #
+    #     wins_init_records.append(wins_init)
+    #     wins_floor_records.append(wins_floor)
+    #     cpi_init_records.append(cpi_init)
+    #     cpi_floor_records.append(cpi_floor)
+    #
+    # fig, axe = plt.subplots(1, 2)
+    #
+    # axe[0].set_xlabel('initial bid')
+    # axe[0].set_ylabel('total wins')
+    # axe[0].plot(bid_inits, wins_init_records, label="InitMode")
+    # axe[0].plot(bid_inits, wins_floor_records, label="FloorMode")
+    # axe[0].legend()
+    # # axe[0].set_title('total_wins')
+    #
+    # axe[1].set_xlabel('initial bid')
+    # axe[1].set_ylabel('cpi')
+    # axe[1].plot(bid_inits, cpi_init_records, label='InitMode')
+    # axe[1].plot(bid_inits, cpi_floor_records, label='FloorMode')
+    # axe[1].legend()
+    # # axe[1].set_title('cpi')
+    #
+    # fig.suptitle('B_50_bfloor_0.1_bcap_10_init_stepsz_0.075_floor_stepsz_0.05')
+    # plt.subplots_adjust(hspace=0, wspace=0.5)
+    # plt.show()
 
 
 
